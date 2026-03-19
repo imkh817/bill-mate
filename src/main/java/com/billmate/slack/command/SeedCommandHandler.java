@@ -67,9 +67,7 @@ public class SeedCommandHandler implements CommandHandler {
             List<Subscription> subs = subscriptionService.listEntitiesByUser(user);
 
             if (subs.isEmpty()) {
-                ctx.client().chatPostMessage(r -> r
-                        .channel(slackUserId)
-                        .text("등록된 구독이 없어요. 구독을 추가한 뒤 다시 시도해주세요."));
+                ctx.respond(r -> r.responseType("ephemeral").text("등록된 구독이 없어요. 구독을 추가한 뒤 다시 시도해주세요."));
                 return;
             }
 
@@ -101,7 +99,7 @@ public class SeedCommandHandler implements CommandHandler {
             sb.append(String.format("\n총 %d건의 결제 이력이 생성되었습니다.", totalCreated));
 
             String message = sb.toString();
-            ctx.client().chatPostMessage(r -> r.channel(slackUserId).text(message));
+            ctx.respond(r -> r.responseType("ephemeral").text(message));
 
         } catch (Exception e) {
             log.error("Seed command error", e);

@@ -1,6 +1,7 @@
 package com.billmate.domain.report.dto;
 
 import com.billmate.domain.subscription.entity.SubscriptionCategory;
+import com.billmate.slack.message.SlackMessageBuilder;
 import lombok.Builder;
 import lombok.Getter;
 
@@ -26,8 +27,10 @@ public class MonthlyReportDto {
         sb.append("*카테고리별 지출*\n");
         categoryTotals.entrySet().stream()
                 .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
-                .forEach(entry -> sb.append(String.format("• %s: %,.0f원\n",
-                        entry.getKey().name(), entry.getValue())));
+                .forEach(entry -> sb.append(String.format("• %s  %s: %,.0f원\n",
+                        SlackMessageBuilder.categoryEmoji(entry.getKey()),
+                        SlackMessageBuilder.categoryLabel(entry.getKey()),
+                        entry.getValue())));
         return sb.toString();
     }
 }
