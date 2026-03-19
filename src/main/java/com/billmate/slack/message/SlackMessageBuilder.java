@@ -1,16 +1,23 @@
 package com.billmate.slack.message;
 
+import com.billmate.domain.notification.entity.NotificationSetting;
 import com.billmate.domain.payment.entity.PaymentRecord;
 import com.billmate.domain.shared.entity.SharedAccount;
 import com.billmate.domain.subscription.dto.SubscriptionResponse;
 import com.billmate.domain.subscription.entity.SubscriptionCategory;
 import com.slack.api.model.block.LayoutBlock;
+import com.slack.api.model.block.composition.OptionObject;
+import com.slack.api.model.block.element.BlockElement;
 import com.slack.api.model.block.element.ButtonElement;
+import com.slack.api.model.block.element.StaticSelectElement;
 
 import java.math.BigDecimal;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static com.slack.api.model.block.Blocks.*;
 import static com.slack.api.model.block.composition.BlockCompositions.*;
@@ -61,21 +68,26 @@ public class SlackMessageBuilder {
 
         for (SubscriptionResponse sub : subs) {
             final long subId = sub.getId();
-            String headerText = String.format("%s  *%s*   ₩%s",
+            String itemText = String.format("%s  *%s*   ₩%s\n매월 *%d일* 결제  ·  %s",
                     categoryEmoji(sub.getCategory()),
                     sub.getServiceName(),
-                    formatAmount(sub.getAmount()));
-            String contextText = String.format("매월 *%d일* 결제  ·  %s",
+                    formatAmount(sub.getAmount()),
                     sub.getBillingDay(),
                     sub.getCategoryDisplay());
 
-            blocks.add(section(s -> s.text(markdownText(headerText))));
-            blocks.add(context(c -> c.elements(List.of(markdownText(contextText)))));
-            blocks.add(actions(a -> a.elements(List.of(
-                    button(b -> b.text(plainText("📜  결제 이력")).actionId("hist_" + subId)),
-                    button(b -> b.text(plainText("🔔  알림")).actionId("ntf_" + subId)),
-                    button(b -> b.text(plainText("🗑️  삭제")).actionId("del_" + subId).style("danger"))
-            ))));
+            List<OptionObject> menuOptions = List.of(
+                    OptionObject.builder().text(plainText("📜  결제 이력")).value("hist_" + subId).build(),
+                    OptionObject.builder().text(plainText("🔔  알림 설정")).value("ntf_" + subId).build(),
+                    OptionObject.builder().text(plainText("🗑️  삭제")).value("del_" + subId).build()
+            );
+
+            blocks.add(section(s -> s
+                    .text(markdownText(itemText))
+                    .accessory(StaticSelectElement.builder()
+                            .actionId("sub_menu")
+                            .placeholder(plainText("관리"))
+                            .options(menuOptions)
+                            .build())));
             blocks.add(divider());
         }
 
@@ -86,10 +98,8 @@ public class SlackMessageBuilder {
     // ── 삭제 확인 ────────────────────────────────────────────────────────────────
 
     public static List<LayoutBlock> buildDeleteConfirm(SubscriptionResponse sub) {
-        String text = String.format("*%s* 구독을 삭제할까요?\n매월 %d일 결제  ·  ₩%s",
-                sub.getServiceName(),
-                sub.getBillingDay(),
-                formatAmount(sub.getAmount()));
+        String text = String.format("*%s* 구독을 삭제할까요?\n매월 *%d일* 결제  ·  ₩%s",
+                sub.getServiceName(), sub.getBillingDay(), formatAmount(sub.getAmount()));
         return List.of(
                 section(s -> s.text(markdownText(text))),
                 actions(a -> a.elements(List.of(
@@ -99,20 +109,74 @@ public class SlackMessageBuilder {
         );
     }
 
-    // ── 알림 일수 선택 ───────────────────────────────────────────────────────────
+    // ── 알림 관리 ────────────────────────────────────────────────────────────────
 
-    public static List<LayoutBlock> buildNotifyOptions(SubscriptionResponse sub) {
+    public static List<LayoutBlock> buildNotifyOptions(SubscriptionResponse sub,
+                                                       List<NotificationSetting> currentSettings) {
         long subId = sub.getId();
-        return List.of(
-                section(s -> s.text(markdownText(
-                        String.format("*🔔 %s 알림 설정*\n결제 며칠 전에 알림을 받으시겠어요?", sub.getServiceName())))),
-                actions(a -> a.elements(List.of(
-                        button(b -> b.text(plainText("1일 전")).actionId("ntf_ok_1_" + subId)),
-                        button(b -> b.text(plainText("3일 전")).actionId("ntf_ok_3_" + subId)),
-                        button(b -> b.text(plainText("7일 전")).actionId("ntf_ok_7_" + subId)),
-                        button(b -> b.text(plainText("← 취소")).actionId("back_list"))
-                )))
-        );
+        List<LayoutBlock> blocks = new ArrayList<>();
+
+        blocks.add(section(s -> s.text(markdownText(
+                String.format("*🔔 %s 알림 설정*\n매월 *%d일* 결제  ·  ₩%s",
+                        sub.getServiceName(), sub.getBillingDay(), formatAmount(sub.getAmount()))))));
+        blocks.add(divider());
+
+        // 현재 등록된 알림 목록 (삭제 버튼 포함)
+        if (currentSettings.isEmpty()) {
+            blocks.add(section(s -> s.text(markdownText("등록된 알림이 없어요."))));
+        } else {
+            blocks.add(section(s -> s.text(markdownText("*현재 알림*"))));
+            currentSettings.stream()
+                    .sorted(Comparator.comparingInt(NotificationSetting::getDaysBeforeBilling).reversed())
+                    .forEach(ns -> {
+                        String label = daysLabel(ns.getDaysBeforeBilling());
+                        blocks.add(section(s -> s
+                                .text(markdownText("• " + label))
+                                .accessory(button(b -> b
+                                        .text(plainText("🗑️ 삭제"))
+                                        .actionId("ntf_del_" + ns.getId() + "_" + subId)
+                                        .style("danger")))));
+                    });
+        }
+
+        // 추가 가능한 알림 버튼 (이미 등록된 일수 제외)
+        Set<Integer> existingDays = currentSettings.stream()
+                .map(NotificationSetting::getDaysBeforeBilling)
+                .collect(Collectors.toSet());
+        List<Integer> availableDays = List.of(0, 1, 3, 7).stream()
+                .filter(d -> !existingDays.contains(d))
+                .toList();
+
+        if (!availableDays.isEmpty()) {
+            blocks.add(divider());
+            blocks.add(section(s -> s.text(markdownText("*알림 추가*"))));
+            List<BlockElement> addButtons = availableDays.stream()
+                    .map(d -> (BlockElement) button(b -> b.text(plainText(daysLabel(d))).actionId("ntf_ok_" + d + "_" + subId)))
+                    .collect(Collectors.toList());
+            blocks.add(actions(a -> a.elements(addButtons)));
+        }
+
+        // 알림 미리보기
+        blocks.add(divider());
+        blocks.add(section(s -> s.text(markdownText(
+                String.format("*💬 알림 미리보기*\n```🔔 결제 예정 알림\n%s 결제일이 3일 후입니다.\n결제 금액: ₩%s```",
+                        sub.getServiceName(), formatAmount(sub.getAmount()))))));
+
+        blocks.add(actions(a -> a.elements(List.of(
+                button(b -> b.text(plainText("← 목록으로")).actionId("back_list"))
+        ))));
+
+        return blocks;
+    }
+
+    private static String daysLabel(int days) {
+        return switch (days) {
+            case 0 -> "당일";
+            case 1 -> "1일 전";
+            case 3 -> "3일 전";
+            case 7 -> "7일 전";
+            default -> days + "일 전";
+        };
     }
 
     // ── 구독 추가 완료 ───────────────────────────────────────────────────────────
@@ -124,6 +188,54 @@ public class SlackMessageBuilder {
                 formatAmount(sub.getAmount()),
                 sub.getCategoryDisplay());
         return List.of(section(s -> s.text(markdownText(text))));
+    }
+
+    // ── 금액 선택 (프리셋 버튼) ──────────────────────────────────────────────────
+
+    public static List<LayoutBlock> buildAmountSelection(String serviceName) {
+        List<LayoutBlock> blocks = new ArrayList<>();
+        blocks.add(section(s -> s.text(markdownText(
+                String.format("*%s* 를 등록할게요.\n월 결제 금액을 선택해주세요.", serviceName)))));
+        blocks.add(divider());
+        // 프리셋 행 1
+        blocks.add(actions(a -> a.elements(List.of(
+                button(b -> b.text(plainText("₩9,900")).actionId("amount_preset_9900")),
+                button(b -> b.text(plainText("₩13,900")).actionId("amount_preset_13900")),
+                button(b -> b.text(plainText("₩14,900")).actionId("amount_preset_14900")),
+                button(b -> b.text(plainText("₩17,000")).actionId("amount_preset_17000")),
+                button(b -> b.text(plainText("₩19,900")).actionId("amount_preset_19900"))
+        ))));
+        // 프리셋 행 2
+        blocks.add(actions(a -> a.elements(List.of(
+                button(b -> b.text(plainText("₩22,000")).actionId("amount_preset_22000")),
+                button(b -> b.text(plainText("₩29,000")).actionId("amount_preset_29000")),
+                button(b -> b.text(plainText("✏️  직접 입력")).actionId("amount_direct"))
+        ))));
+        return blocks;
+    }
+
+    // ── 결제일 선택 (드롭다운) ───────────────────────────────────────────────────
+
+    public static List<LayoutBlock> buildBillingDaySelection(String serviceName, BigDecimal amount) {
+        List<OptionObject> options = new ArrayList<>();
+        for (int day = 1; day <= 31; day++) {
+            final int d = day;
+            options.add(OptionObject.builder()
+                    .text(plainText(d + "일"))
+                    .value(String.valueOf(d))
+                    .build());
+        }
+
+        return List.of(
+                section(s -> s.text(markdownText(
+                        String.format("*%s*  ₩%s\n매월 몇 일에 결제되나요?",
+                                serviceName, formatAmount(amount))))
+                        .accessory(StaticSelectElement.builder()
+                                .actionId("billing_day_select")
+                                .placeholder(plainText("날짜 선택"))
+                                .options(options)
+                                .build()))
+        );
     }
 
     // ── 카테고리 버튼 ────────────────────────────────────────────────────────────

@@ -51,6 +51,21 @@ public class NotificationService {
     }
 
     @Transactional(readOnly = true)
+    public List<NotificationSetting> getByUserAndSubscription(User user, Subscription subscription) {
+        return notificationSettingRepository.findByUserAndSubscription(user, subscription);
+    }
+
+    @Transactional
+    public void deleteNotification(User user, Long settingId) {
+        NotificationSetting setting = notificationSettingRepository.findById(settingId)
+                .orElseThrow(() -> new IllegalArgumentException("NotificationSetting not found: " + settingId));
+        if (!setting.getUser().getId().equals(user.getId())) {
+            throw new IllegalArgumentException("Not authorized");
+        }
+        notificationSettingRepository.delete(setting);
+    }
+
+    @Transactional(readOnly = true)
     public List<NotificationSetting> findDueNotifications(int targetDay, int daysBeforeBilling) {
         return notificationSettingRepository.findDueNotifications(targetDay, daysBeforeBilling);
     }
