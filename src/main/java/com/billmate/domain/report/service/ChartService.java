@@ -24,7 +24,7 @@ public class ChartService {
         }
 
         String labels = categoryAmounts.keySet().stream()
-                .map(cat -> "\"" + cat.name() + "\"")
+                .map(cat -> "\"" + cat.displayName() + "\"")
                 .collect(Collectors.joining(","));
 
         String data = categoryAmounts.values().stream()

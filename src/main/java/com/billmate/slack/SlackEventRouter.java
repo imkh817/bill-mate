@@ -337,7 +337,7 @@ public class SlackEventRouter {
                 String botToken = tokenResolver.getBotToken(teamId);
                 String catLabel = SlackMessageBuilder.categoryEmoji(SubscriptionCategory.valueOf(categoryCode))
                         + "  " + SlackMessageBuilder.categoryLabel(SubscriptionCategory.valueOf(categoryCode));
-                String prompt = String.format("*%s* 를 선택하셨어요.\n\n서비스 이름을 아래 DM에 입력해주세요.\n_예) Netflix, Spotify, GitHub_", catLabel);
+                String prompt = String.format("*%s* 를 선택하셨어요.\n\n서비스 이름을 아래 채팅창에 입력해주세요.\n_예) Netflix, Spotify, GitHub_", catLabel);
                 update(botToken, channelId, messageTs,
                         List.of(section(s -> s.text(markdownText(prompt)))));
             } catch (Exception e) {
@@ -364,7 +364,7 @@ public class SlackEventRouter {
 
             try {
                 String botToken = tokenResolver.getBotToken(teamId);
-                String prompt = String.format("*%s* 카테고리를 선택하셨어요.\n\n서비스 이름을 아래 DM에 입력해주세요.\n_예) Netflix, Spotify, GitHub_", categoryName);
+                String prompt = String.format("*%s* 카테고리를 선택하셨어요.\n\n서비스 이름을 아래 채팅창에 입력해주세요.\n_예) Netflix, Spotify, GitHub_", categoryName);
                 update(botToken, channelId, messageTs,
                         List.of(section(s -> s.text(markdownText(prompt)))));
             } catch (Exception e) {
@@ -406,7 +406,7 @@ public class SlackEventRouter {
             try {
                 String botToken = tokenResolver.getBotToken(teamId);
                 update(botToken, channelId, messageTs,
-                        List.of(section(s -> s.text(markdownText("금액을 아래 DM에 직접 입력해주세요.\n_예) 15900_")))));
+                        List.of(section(s -> s.text(markdownText("금액을 채팅창에 입력해주세요. (예: 15900)")))));
             } catch (Exception e) {
                 log.error("amount_direct error", e);
             }
@@ -442,7 +442,7 @@ public class SlackEventRouter {
                                 .build());
                 update(botToken, channelId, messageTs,
                         List.of(section(s -> s.text(markdownText(
-                                String.format("✅ *%s* 구독을 등록했어요!", state.getServiceName()))))));
+                                String.format("*%s* 구독을 등록했어요!", state.getServiceName()))))));
                 List<SubscriptionResponse> subs = subscriptionService.listByUser(user);
                 post(botToken, userId, SlackMessageBuilder.buildSubscriptionList(subs));
             } catch (Exception e) {
@@ -468,7 +468,7 @@ public class SlackEventRouter {
             try {
                 String botToken = tokenResolver.getBotToken(teamId);
                 update(botToken, channelId, messageTs,
-                        List.of(section(s -> s.text(markdownText("카테고리 이름을 아래 DM에 입력해주세요.\n_예) 클라우드, 업무 도구_")))));
+                        List.of(section(s -> s.text(markdownText("카테고리 이름을 채팅창에 입력해주세요. (예: 클라우드)")))));
             } catch (Exception e) {
                 log.error("new_category action error", e);
             }

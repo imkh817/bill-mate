@@ -3,6 +3,7 @@ package com.billmate.slack;
 import com.billmate.domain.user.service.UserService;
 import com.billmate.slack.install.SlackInstallation;
 import com.billmate.slack.install.SlackInstallationRepository;
+import com.billmate.slack.message.SlackMessageBuilder;
 import com.slack.api.bolt.App;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,6 +39,13 @@ public class OAuthCallbackController {
         this.userService = userService;
         this.slackApp = slackApp;
         this.slackRestClient = slackRestClient;
+    }
+
+    @GetMapping({"/slack/install", "/slack/oauth/install"})
+    public RedirectView install() {
+        String scopes = "chat:write,commands,im:history,im:read,im:write";
+        String url = "https://slack.com/oauth/v2/authorize?client_id=" + clientId + "&scope=" + scopes;
+        return new RedirectView(url);
     }
 
     @GetMapping("/slack/oauth/callback")
@@ -84,13 +92,12 @@ public class OAuthCallbackController {
             return new RedirectView("/slack/install/error");
         }
 
-        return new RedirectView("/slack/install/success");
+        return new RedirectView("/install-success.html");
     }
 
     @GetMapping("/slack/install/success")
-    @ResponseStatus(HttpStatus.OK)
-    public String success() {
-        return "설치가 완료됐습니다! Slack에서 앱에게 메시지를 보내보세요.";
+    public RedirectView success() {
+        return new RedirectView("/install-success.html");
     }
 
     @GetMapping("/slack/install/error")
@@ -104,7 +111,8 @@ public class OAuthCallbackController {
             slackApp.client().chatPostMessage(r -> r
                     .token(botToken)
                     .channel(userId)
-                    .text("안녕하세요! bill-mate입니다 :wave:\n구독 관리를 시작하려면 메시지를 보내주세요!"));
+                    .text("bill-mate에 오신 것을 환영합니다!")
+                    .blocks(SlackMessageBuilder.buildOnboarding()));
         } catch (Exception e) {
             log.error("Failed to send welcome DM to user={}", userId, e);
         }

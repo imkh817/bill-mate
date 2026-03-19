@@ -68,6 +68,8 @@ public class SeedCommandHandler implements CommandHandler {
 
             if (subs.isEmpty()) {
                 ctx.respond(r -> r.responseType("ephemeral").text("등록된 구독이 없어요. 구독을 추가한 뒤 다시 시도해주세요."));
+                Thread.sleep(2_000);
+                ctx.getResponder().sendToAction(r -> r.deleteOriginal(true));
                 return;
             }
 
@@ -100,6 +102,8 @@ public class SeedCommandHandler implements CommandHandler {
 
             String message = sb.toString();
             ctx.respond(r -> r.responseType("ephemeral").text(message));
+            Thread.sleep(2_000);
+            ctx.getResponder().sendToAction(r -> r.deleteOriginal(true));
 
         } catch (Exception e) {
             log.error("Seed command error", e);

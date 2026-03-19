@@ -5,6 +5,7 @@ import com.billmate.domain.payment.entity.PaymentRecord;
 import com.billmate.domain.shared.entity.SharedAccount;
 import com.billmate.domain.subscription.dto.SubscriptionResponse;
 import com.billmate.domain.subscription.entity.SubscriptionCategory;
+import com.slack.api.model.block.ContextBlockElement;
 import com.slack.api.model.block.LayoutBlock;
 import com.slack.api.model.block.composition.OptionObject;
 import com.slack.api.model.block.element.BlockElement;
@@ -27,24 +28,42 @@ public class SlackMessageBuilder {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy.MM.dd");
 
-    // ── 웰컴 (구독 없을 때) ─────────────────────────────────────────────────────
+    // ── 온보딩 (최초 설치 시) ────────────────────────────────────────────────────
 
-    public static List<LayoutBlock> buildWelcome() {
+    public static List<LayoutBlock> buildOnboarding() {
         return List.of(
-                section(s -> s.text(markdownText("안녕하세요! 👋\n아직 등록된 구독이 없어요.\n첫 구독을 추가해보세요."))),
+                section(s -> s.text(markdownText(
+                        "👋 안녕하세요! *bill-mate* 에 오신 것을 환영합니다 🎉\n" +
+                        "구독 서비스를 등록하고 결제일 알림과 월간 리포트를 Slack DM에서 관리해보세요."))),
+                divider(),
+                section(s -> s.text(markdownText(
+                        "*Step 1. 구독 추가*\n" +
+                        "이 메시지 하단의 *[➕ 구독 추가]* 버튼을 눌러\nNetflix, Spotify 등 구독 서비스를 등록해보세요."))),
+                section(s -> s.text(markdownText(
+                        "*Step 2. 리포트 확인*\n" +
+                        "구독 목록 하단의 *[📊 리포트]* 버튼을 눌러\n월간 지출 리포트와 카테고리별 차트를 확인해보세요."))),
+                section(s -> s.text(markdownText(
+                        "*Step 3. 알림 설정*\n" +
+                        "구독 항목의 *[관리 ▼]* → 알림 설정에서\n결제 며칠 전에 알림을 받을지 설정해보세요."))),
+                divider(),
+                section(s -> s.text(markdownText(
+                        "🧹 대화 기록이 지저분해지면 `/billmate clear` 로 정리할 수 있어요.\n" +
+                        "궁금한 점은 `/billmate help` 를 입력해주세요!"))),
+                divider(),
                 actions(a -> a.elements(List.of(
                         button(b -> b.text(plainText("➕  구독 추가")).actionId("menu_add").style("primary"))
                 )))
         );
     }
 
-    // ── 목록 하단 액션 버튼 ──────────────────────────────────────────────────────
+    // ── 웰컴 (구독 없을 때) ─────────────────────────────────────────────────────
 
-    public static List<LayoutBlock> buildListActions() {
+    public static List<LayoutBlock> buildWelcome() {
         return List.of(
+                section(s -> s.text(markdownText("안녕하세요! 👋\n아직 등록된 구독이 없어요."))),
+                section(s -> s.text(markdownText("첫 구독을 추가해보세요."))),
                 actions(a -> a.elements(List.of(
-                        button(b -> b.text(plainText("➕  구독 추가")).actionId("menu_add").style("primary")),
-                        button(b -> b.text(plainText("📊  리포트")).actionId("menu_report"))
+                        button(b -> b.text(plainText("➕  구독 추가")).actionId("menu_add").style("primary"))
                 )))
         );
     }
@@ -62,18 +81,21 @@ public class SlackMessageBuilder {
                 .map(SubscriptionResponse::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        blocks.add(section(s -> s.text(markdownText(
-                String.format("*📋 내 구독*   _%d개 · 월 ₩%s_", subs.size(), formatAmount(total))))));
+        blocks.add(header(h -> h.text(plainText("📋 내 구독"))));
+        blocks.add(context(c -> c.elements(
+                List.<ContextBlockElement>of(
+                        markdownText(String.format("_%d개 · 월 ₩%s_", subs.size(), formatAmount(total)))))));
         blocks.add(divider());
 
         for (SubscriptionResponse sub : subs) {
             final long subId = sub.getId();
-            String itemText = String.format("%s  *%s*   ₩%s\n매월 *%d일* 결제  ·  %s",
+            final int billingDay = sub.getBillingDay();
+            final String categoryDisplay = sub.getCategoryDisplay();
+
+            String itemText = String.format("%s  *%s*   ₩%s",
                     categoryEmoji(sub.getCategory()),
                     sub.getServiceName(),
-                    formatAmount(sub.getAmount()),
-                    sub.getBillingDay(),
-                    sub.getCategoryDisplay());
+                    formatAmount(sub.getAmount()));
 
             List<OptionObject> menuOptions = List.of(
                     OptionObject.builder().text(plainText("📜  결제 이력")).value("hist_" + subId).build(),
@@ -85,25 +107,34 @@ public class SlackMessageBuilder {
                     .text(markdownText(itemText))
                     .accessory(StaticSelectElement.builder()
                             .actionId("sub_menu")
-                            .placeholder(plainText("관리"))
+                            .placeholder(plainText("관리 ▼"))
                             .options(menuOptions)
                             .build())));
+            blocks.add(context(c -> c.elements(
+                    List.<ContextBlockElement>of(
+                            markdownText(String.format("매월 *%d일* 결제  ·  %s", billingDay, categoryDisplay))))));
             blocks.add(divider());
         }
 
-        blocks.addAll(buildListActions());
+        blocks.add(actions(a -> a.elements(List.of(
+                button(b -> b.text(plainText("➕  구독 추가")).actionId("menu_add").style("primary")),
+                button(b -> b.text(plainText("📊  리포트")).actionId("menu_report"))
+        ))));
         return blocks;
     }
 
     // ── 삭제 확인 ────────────────────────────────────────────────────────────────
 
     public static List<LayoutBlock> buildDeleteConfirm(SubscriptionResponse sub) {
-        String text = String.format("*%s* 구독을 삭제할까요?\n매월 *%d일* 결제  ·  ₩%s",
-                sub.getServiceName(), sub.getBillingDay(), formatAmount(sub.getAmount()));
         return List.of(
-                section(s -> s.text(markdownText(text))),
+                section(s -> s.text(markdownText(
+                        String.format("⚠️ *%s* 구독을 삭제할까요?", sub.getServiceName())))),
+                context(c -> c.elements(
+                        List.<ContextBlockElement>of(
+                                markdownText(String.format("매월 *%d일* 결제  ·  ₩%s",
+                                        sub.getBillingDay(), formatAmount(sub.getAmount())))))),
                 actions(a -> a.elements(List.of(
-                        button(b -> b.text(plainText("🗑️  삭제 확인")).actionId("del_ok_" + sub.getId()).style("danger")),
+                        button(b -> b.text(plainText("🗑️  삭제")).actionId("del_ok_" + sub.getId()).style("danger")),
                         button(b -> b.text(plainText("← 취소")).actionId("back_list"))
                 )))
         );
@@ -116,22 +147,24 @@ public class SlackMessageBuilder {
         long subId = sub.getId();
         List<LayoutBlock> blocks = new ArrayList<>();
 
+        blocks.add(header(h -> h.text(plainText("🔔 알림 설정"))));
         blocks.add(section(s -> s.text(markdownText(
-                String.format("*🔔 %s 알림 설정*\n매월 *%d일* 결제  ·  ₩%s",
-                        sub.getServiceName(), sub.getBillingDay(), formatAmount(sub.getAmount()))))));
+                String.format("*%s*   ₩%s", sub.getServiceName(), formatAmount(sub.getAmount()))))));
+        blocks.add(context(c -> c.elements(
+                List.<ContextBlockElement>of(
+                        markdownText(String.format("매월 *%d일* 결제", sub.getBillingDay()))))));
         blocks.add(divider());
 
-        // 현재 등록된 알림 목록 (삭제 버튼 포함)
         if (currentSettings.isEmpty()) {
-            blocks.add(section(s -> s.text(markdownText("등록된 알림이 없어요."))));
+            blocks.add(context(c -> c.elements(
+                    List.<ContextBlockElement>of(markdownText("등록된 알림이 없어요.")))));
         } else {
-            blocks.add(section(s -> s.text(markdownText("*현재 알림*"))));
             currentSettings.stream()
                     .sorted(Comparator.comparingInt(NotificationSetting::getDaysBeforeBilling).reversed())
                     .forEach(ns -> {
                         String label = daysLabel(ns.getDaysBeforeBilling());
                         blocks.add(section(s -> s
-                                .text(markdownText("• " + label))
+                                .text(markdownText(label))
                                 .accessory(button(b -> b
                                         .text(plainText("🗑️ 삭제"))
                                         .actionId("ntf_del_" + ns.getId() + "_" + subId)
@@ -139,7 +172,6 @@ public class SlackMessageBuilder {
                     });
         }
 
-        // 추가 가능한 알림 버튼 (이미 등록된 일수 제외)
         Set<Integer> existingDays = currentSettings.stream()
                 .map(NotificationSetting::getDaysBeforeBilling)
                 .collect(Collectors.toSet());
@@ -149,19 +181,13 @@ public class SlackMessageBuilder {
 
         if (!availableDays.isEmpty()) {
             blocks.add(divider());
-            blocks.add(section(s -> s.text(markdownText("*알림 추가*"))));
             List<BlockElement> addButtons = availableDays.stream()
                     .map(d -> (BlockElement) button(b -> b.text(plainText(daysLabel(d))).actionId("ntf_ok_" + d + "_" + subId)))
                     .collect(Collectors.toList());
             blocks.add(actions(a -> a.elements(addButtons)));
         }
 
-        // 알림 미리보기
         blocks.add(divider());
-        blocks.add(section(s -> s.text(markdownText(
-                String.format("*💬 알림 미리보기*\n```🔔 결제 예정 알림\n%s 결제일이 3일 후입니다.\n결제 금액: ₩%s```",
-                        sub.getServiceName(), formatAmount(sub.getAmount()))))));
-
         blocks.add(actions(a -> a.elements(List.of(
                 button(b -> b.text(plainText("← 목록으로")).actionId("back_list"))
         ))));
@@ -182,7 +208,7 @@ public class SlackMessageBuilder {
     // ── 구독 추가 완료 ───────────────────────────────────────────────────────────
 
     public static List<LayoutBlock> buildSubscriptionAdded(SubscriptionResponse sub) {
-        String text = String.format("✅  *%s* 구독을 등록했어요!\n매월 *%d일* 결제  ·  *₩%s*  ·  %s",
+        String text = String.format("*%s* 구독을 등록했어요!\n매월 *%d일* 결제  ·  *₩%s*  ·  %s",
                 sub.getServiceName(),
                 sub.getBillingDay(),
                 formatAmount(sub.getAmount()),
@@ -194,10 +220,9 @@ public class SlackMessageBuilder {
 
     public static List<LayoutBlock> buildAmountSelection(String serviceName) {
         List<LayoutBlock> blocks = new ArrayList<>();
+        blocks.add(header(h -> h.text(plainText("💳 금액 선택"))));
         blocks.add(section(s -> s.text(markdownText(
-                String.format("*%s* 를 등록할게요.\n월 결제 금액을 선택해주세요.", serviceName)))));
-        blocks.add(divider());
-        // 프리셋 행 1
+                String.format("*%s* 월 결제 금액을 선택해주세요.", serviceName)))));
         blocks.add(actions(a -> a.elements(List.of(
                 button(b -> b.text(plainText("₩9,900")).actionId("amount_preset_9900")),
                 button(b -> b.text(plainText("₩13,900")).actionId("amount_preset_13900")),
@@ -205,7 +230,6 @@ public class SlackMessageBuilder {
                 button(b -> b.text(plainText("₩17,000")).actionId("amount_preset_17000")),
                 button(b -> b.text(plainText("₩19,900")).actionId("amount_preset_19900"))
         ))));
-        // 프리셋 행 2
         blocks.add(actions(a -> a.elements(List.of(
                 button(b -> b.text(plainText("₩22,000")).actionId("amount_preset_22000")),
                 button(b -> b.text(plainText("₩29,000")).actionId("amount_preset_29000")),
@@ -227,14 +251,16 @@ public class SlackMessageBuilder {
         }
 
         return List.of(
-                section(s -> s.text(markdownText(
-                        String.format("*%s*  ₩%s\n매월 몇 일에 결제되나요?",
-                                serviceName, formatAmount(amount))))
+                header(h -> h.text(plainText("📅 결제일 설정"))),
+                section(s -> s
+                        .text(markdownText(String.format("*%s*  ·  ₩%s", serviceName, formatAmount(amount))))
                         .accessory(StaticSelectElement.builder()
                                 .actionId("billing_day_select")
-                                .placeholder(plainText("날짜 선택"))
+                                .placeholder(plainText("날짜 선택 ▼"))
                                 .options(options)
-                                .build()))
+                                .build())),
+                context(c -> c.elements(
+                        List.<ContextBlockElement>of(markdownText("매월 몇 일에 결제되나요?"))))
         );
     }
 
@@ -242,18 +268,15 @@ public class SlackMessageBuilder {
 
     public static List<LayoutBlock> buildCategoryButtons(List<String> customCategories) {
         List<LayoutBlock> blocks = new ArrayList<>();
-        blocks.add(section(s -> s.text(markdownText("*➕ 구독 추가*\n어떤 종류의 구독인가요?"))));
-        blocks.add(divider());
-
-        // 기본 3개 + 직접 입력
+        blocks.add(header(h -> h.text(plainText("➕ 구독 추가"))));
+        blocks.add(section(s -> s.text(markdownText("어떤 종류의 구독인가요?"))));
         blocks.add(actions(a -> a.elements(List.of(
-                button(b -> b.text(plainText("📺  OTT")).actionId("category_OTT")),
+                button(b -> b.text(plainText("🎬  동영상")).actionId("category_OTT")),
                 button(b -> b.text(plainText("🎵  음악")).actionId("category_MUSIC_STREAMING")),
-                button(b -> b.text(plainText("🤖  AI")).actionId("category_AI_TOOL")),
-                button(b -> b.text(plainText("✏️  직접 입력")).actionId("new_category"))
+                button(b -> b.text(plainText("✨  AI")).actionId("category_AI_TOOL")),
+                button(b -> b.text(plainText("📝  직접 입력")).actionId("new_category"))
         ))));
 
-        // 이전 커스텀 카테고리 (인덱스 기반 고유 actionId + value에 이름)
         if (customCategories != null && !customCategories.isEmpty()) {
             int chunkSize = 5;
             for (int i = 0; i < customCategories.size(); i += chunkSize) {
@@ -279,10 +302,11 @@ public class SlackMessageBuilder {
 
     public static List<LayoutBlock> buildPaymentHistory(String serviceName, List<PaymentRecord> records) {
         List<LayoutBlock> blocks = new ArrayList<>();
+        blocks.add(header(h -> h.text(plainText("📜 결제 이력"))));
 
         if (records.isEmpty()) {
             blocks.add(section(s -> s.text(markdownText(
-                    String.format("*📜 %s 결제 이력*\n\n아직 결제 이력이 없어요.", serviceName)))));
+                    String.format("*%s*   아직 결제 이력이 없어요.", serviceName)))));
             blocks.add(actions(a -> a.elements(List.of(
                     button(b -> b.text(plainText("← 목록으로")).actionId("back_list"))
             ))));
@@ -294,13 +318,13 @@ public class SlackMessageBuilder {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         blocks.add(section(s -> s.text(markdownText(
-                String.format("*📜 %s 결제 이력*   _%d건 · 총 ₩%s_",
+                String.format("*%s*   _%d건 · 총 ₩%s_",
                         serviceName, records.size(), formatAmount(total))))));
         blocks.add(divider());
 
         for (PaymentRecord record : records) {
             String statusEmoji = switch (record.getStatus()) {
-                case PAID -> "✅";
+                case PAID -> "💳";
                 case SKIPPED -> "⏭️";
                 case CANCELLED -> "❌";
             };
@@ -350,24 +374,26 @@ public class SlackMessageBuilder {
             default -> daysBeforeBilling + "일 후";
         };
 
-        String text = String.format(
-                "*🔔 결제 예정 알림*\n\n*%s* 결제일이 *%s*입니다.\n결제 금액: *₩%s*",
-                serviceName, dayText, formatAmount(amount));
-
+        String contextText = "결제 금액  *₩" + formatAmount(amount) + "*";
         if (cancelUrl != null && !cancelUrl.isBlank()) {
-            text += String.format("\n\n구독 해지를 원하시면 <%s|여기>를 눌러주세요.", cancelUrl);
+            contextText += String.format("   <%s|구독 해지>", cancelUrl);
         }
+        final String finalContextText = contextText;
 
-        final String finalText = text;
-        return List.of(section(s -> s.text(markdownText(finalText))));
+        return List.of(
+                section(s -> s.text(markdownText("🔔 *결제 예정 알림*"))),
+                section(s -> s.text(markdownText(
+                        String.format("*%s* 결제일이 *%s*입니다.", serviceName, dayText)))),
+                context(c -> c.elements(
+                        List.<ContextBlockElement>of(markdownText(finalContextText))))
+        );
     }
 
     // ── 월간 리포트 ──────────────────────────────────────────────────────────────
 
     public static List<LayoutBlock> buildMonthlyReport(String summary, String chartUrl) {
         List<LayoutBlock> blocks = new ArrayList<>();
-        blocks.add(section(s -> s.text(markdownText("*📊 월간 구독 리포트*"))));
-        blocks.add(divider());
+        blocks.add(header(h -> h.text(plainText("📊 월간 구독 리포트"))));
         blocks.add(section(s -> s.text(markdownText(summary))));
         if (chartUrl != null && !chartUrl.isBlank()) {
             blocks.add(image(i -> i
@@ -409,34 +435,22 @@ public class SlackMessageBuilder {
 
     public static String categoryEmoji(SubscriptionCategory cat) {
         return switch (cat) {
-            case OTT -> "📺";
+            case OTT -> "🎬";
             case MUSIC_STREAMING -> "🎵";
-            case CLOUD_STORAGE -> "☁️";
-            case PRODUCTIVITY -> "📋";
-            case DEVELOPER_TOOL -> "💻";
-            case AI_TOOL -> "🤖";
-            case GAME -> "🎮";
-            case FITNESS -> "💪";
-            case NEWS -> "📰";
-            case EDUCATION -> "📚";
-            case OTHER -> "📦";
+            case CLOUD_STORAGE -> "🗄️";
+            case PRODUCTIVITY -> "🗂️";
+            case DEVELOPER_TOOL -> "🛠️";
+            case AI_TOOL -> "✨";
+            case GAME -> "🕹️";
+            case FITNESS -> "🏃";
+            case NEWS -> "🗞️";
+            case EDUCATION -> "🎓";
+            case OTHER -> "🔖";
         };
     }
 
     public static String categoryLabel(SubscriptionCategory cat) {
-        return switch (cat) {
-            case OTT -> "동영상";
-            case MUSIC_STREAMING -> "음악";
-            case CLOUD_STORAGE -> "클라우드";
-            case PRODUCTIVITY -> "생산성";
-            case DEVELOPER_TOOL -> "개발 도구";
-            case AI_TOOL -> "AI";
-            case GAME -> "게임";
-            case FITNESS -> "피트니스";
-            case NEWS -> "뉴스";
-            case EDUCATION -> "교육";
-            case OTHER -> "기타";
-        };
+        return cat.displayName();
     }
 
     private static String formatAmount(BigDecimal amount) {

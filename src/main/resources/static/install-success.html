@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>설치 완료 · bill-mate</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link
+    href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"
+    rel="stylesheet"
+  />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --blue:   #3182F6;
+      --green:  #00C471;
+      --ink:    #191F28;
+      --sub:    #8B95A1;
+      --bg:     #F2F4F6;
+      --card:   #FFFFFF;
+      --radius: 20px;
+    }
+
+    body {
+      font-family: 'Pretendard', -apple-system, sans-serif;
+      background: var(--bg);
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 56px 40px 48px;
+      max-width: 400px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 2px 16px rgba(0,0,0,.06), 0 0 0 1px rgba(0,0,0,.04);
+      animation: rise .45s cubic-bezier(.22,.68,0,1.2) both;
+    }
+
+    /* ── 체크 아이콘 ── */
+    .icon-wrap {
+      width: 72px;
+      height: 72px;
+      background: #E8FAF3;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 28px;
+      animation: pop .5s .15s cubic-bezier(.22,.68,0,1.35) both;
+    }
+
+    .checkmark {
+      width: 36px;
+      height: 36px;
+      stroke: var(--green);
+      stroke-width: 2.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
+    }
+
+    .checkmark path {
+      stroke-dasharray: 40;
+      stroke-dashoffset: 40;
+      animation: draw .4s .45s cubic-bezier(.4,0,.2,1) forwards;
+    }
+
+    /* ── 텍스트 ── */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--blue);
+      background: #EBF3FF;
+      padding: 4px 10px;
+      border-radius: 99px;
+      margin-bottom: 16px;
+      letter-spacing: .02em;
+      animation: fadein .4s .3s both;
+    }
+
+    .title {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--ink);
+      letter-spacing: -.025em;
+      line-height: 1.25;
+      margin-bottom: 12px;
+      animation: fadein .4s .35s both;
+    }
+
+    .desc {
+      font-size: 15px;
+      color: var(--sub);
+      line-height: 1.65;
+      word-break: keep-all;
+      margin-bottom: 36px;
+      animation: fadein .4s .4s both;
+    }
+
+    /* ── 버튼 ── */
+    .btn-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      animation: fadein .4s .5s both;
+    }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      height: 52px;
+      border-radius: 14px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: opacity .15s, transform .15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .btn:active { transform: scale(.97); opacity: .85; }
+
+    .btn-primary {
+      background: var(--blue);
+      color: #fff;
+    }
+
+    .btn-secondary {
+      background: #F2F4F6;
+      color: var(--ink);
+    }
+
+    /* ── 하단 힌트 ── */
+    .hint {
+      margin-top: 24px;
+      font-size: 13px;
+      color: #B0B8C1;
+      animation: fadein .4s .6s both;
+    }
+
+    /* ── 키프레임 ── */
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pop {
+      from { opacity: 0; transform: scale(.6); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    @keyframes draw {
+      to { stroke-dashoffset: 0; }
+    }
+    @keyframes fadein {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 480px) {
+      .card { padding: 44px 28px 40px; }
+      .title { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+
+    <div class="icon-wrap">
+      <svg class="checkmark" viewBox="0 0 24 24">
+        <path d="M5 12.5 L10 17.5 L19 8"/>
+      </svg>
+    </div>
+
+    <div class="badge">
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+        <circle cx="5" cy="5" r="5"/>
+      </svg>
+      bill-mate
+    </div>
+
+    <h1 class="title">설치 완료!</h1>
+
+    <p class="desc">
+      bill-mate가 성공적으로 설치되었습니다.<br />
+      Slack으로 돌아가서 앱을 사용해보세요.
+    </p>
+
+    <div class="btn-group">
+      <a class="btn btn-primary" href="slack://open">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+        </svg>
+        Slack 열기
+      </a>
+      <a class="btn btn-secondary" href="https://slack.com" target="_blank" rel="noopener">
+        웹에서 열기
+      </a>
+    </div>
+
+    <p class="hint">버튼이 작동하지 않으면 Slack 앱을 직접 열어주세요.</p>
+
+  </div>
+</body>
+</html>

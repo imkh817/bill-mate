@@ -59,9 +59,9 @@ public class ClearCommandHandler implements CommandHandler {
 
             log.info("Clear command: {}개 메시지 삭제 (userId={})", deleted, slackUserId);
 
-            ctx.client().chatPostMessage(r -> r
-                    .channel(slackUserId)
-                    .text("대화 기록이 정리되었습니다. 새롭게 시작해보세요! :sparkles:"));
+            // ctx.client().chatPostMessage(r -> r
+            //         .channel(slackUserId)
+            //         .text("대화 기록이 정리되었습니다. 새롭게 시작해보세요! :sparkles:"));
 
         } catch (Exception e) {
             log.error("Clear command error (userId={})", slackUserId, e);
