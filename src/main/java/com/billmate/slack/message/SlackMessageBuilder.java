@@ -5,7 +5,6 @@ import com.billmate.domain.shared.entity.SharedAccount;
 import com.billmate.domain.subscription.dto.SubscriptionResponse;
 import com.billmate.domain.subscription.entity.SubscriptionCategory;
 import com.slack.api.model.block.LayoutBlock;
-import com.slack.api.model.block.element.BlockElements;
 import com.slack.api.model.block.element.ButtonElement;
 
 import java.math.BigDecimal;
@@ -21,64 +20,99 @@ public class SlackMessageBuilder {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy.MM.dd");
 
-    // ── 메인 메뉴 ────────────────────────────────────────────────────────────────
+    // ── 웰컴 (구독 없을 때) ─────────────────────────────────────────────────────
 
-    public static List<LayoutBlock> buildMainMenu() {
-        return buildMainMenu(null);
+    public static List<LayoutBlock> buildWelcome() {
+        return List.of(
+                section(s -> s.text(markdownText("안녕하세요! 👋\n아직 등록된 구독이 없어요.\n첫 구독을 추가해보세요."))),
+                actions(a -> a.elements(List.of(
+                        button(b -> b.text(plainText("➕  구독 추가")).actionId("menu_add").style("primary"))
+                )))
+        );
     }
 
-    public static List<LayoutBlock> buildMainMenu(String contextMessage) {
-        List<LayoutBlock> blocks = new ArrayList<>();
+    // ── 목록 하단 액션 버튼 ──────────────────────────────────────────────────────
 
-        String intro = contextMessage != null
-                ? contextMessage + "\n\n무엇을 더 도와드릴까요?"
-                : "안녕하세요! 무엇을 도와드릴까요? :wave:";
-
-        blocks.add(section(s -> s.text(markdownText(intro))));
-        blocks.add(divider());
-        blocks.add(actions(a -> a.elements(List.of(
-                button(b -> b.text(plainText("➕  구독 추가")).actionId("menu_add").style("primary")),
-                button(b -> b.text(plainText("📋  목록 보기")).actionId("menu_list")),
-                button(b -> b.text(plainText("📊  리포트")).actionId("menu_report"))
-        ))));
-        blocks.add(actions(a -> a.elements(List.of(
-                button(b -> b.text(plainText("📜  결제 이력")).actionId("menu_history")),
-                button(b -> b.text(plainText("🗑️  구독 삭제")).actionId("menu_delete").style("danger")),
-                button(b -> b.text(plainText("🔔  알림 설정")).actionId("menu_notify")),
-                button(b -> b.text(plainText("👥  공유 설정")).actionId("menu_share"))
-        ))));
-        return blocks;
+    public static List<LayoutBlock> buildListActions() {
+        return List.of(
+                actions(a -> a.elements(List.of(
+                        button(b -> b.text(plainText("➕  구독 추가")).actionId("menu_add").style("primary")),
+                        button(b -> b.text(plainText("📊  리포트")).actionId("menu_report"))
+                )))
+        );
     }
 
-    // ── 구독 목록 ────────────────────────────────────────────────────────────────
+    // ── 구독 목록 ─────────────────────────────────────────────────────────────
 
     public static List<LayoutBlock> buildSubscriptionList(List<SubscriptionResponse> subs) {
-        List<LayoutBlock> blocks = new ArrayList<>();
-
         if (subs.isEmpty()) {
-            blocks.add(section(s -> s.text(markdownText(
-                    "*📋 구독 목록*\n\n아직 등록된 구독이 없어요.\n*➕ 구독 추가* 버튼으로 첫 구독을 등록해보세요!"))));
-            return blocks;
+            return buildWelcome();
         }
+
+        List<LayoutBlock> blocks = new ArrayList<>();
 
         BigDecimal total = subs.stream()
                 .map(SubscriptionResponse::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         blocks.add(section(s -> s.text(markdownText(
-                String.format("*📋 구독 목록*   _%d개 · 월 ₩%s_", subs.size(), formatAmount(total))))));
+                String.format("*📋 내 구독*   _%d개 · 월 ₩%s_", subs.size(), formatAmount(total))))));
         blocks.add(divider());
 
         for (SubscriptionResponse sub : subs) {
-            String text = String.format("%s  *%s*   `₩%s`\n매월 *%d일* 결제  ·  %s",
+            final long subId = sub.getId();
+            String headerText = String.format("%s  *%s*   ₩%s",
                     categoryEmoji(sub.getCategory()),
                     sub.getServiceName(),
-                    formatAmount(sub.getAmount()),
+                    formatAmount(sub.getAmount()));
+            String contextText = String.format("매월 *%d일* 결제  ·  %s",
                     sub.getBillingDay(),
                     sub.getCategoryDisplay());
-            blocks.add(section(s -> s.text(markdownText(text))));
+
+            blocks.add(section(s -> s.text(markdownText(headerText))));
+            blocks.add(context(c -> c.elements(List.of(markdownText(contextText)))));
+            blocks.add(actions(a -> a.elements(List.of(
+                    button(b -> b.text(plainText("📜  결제 이력")).actionId("hist_" + subId)),
+                    button(b -> b.text(plainText("🔔  알림")).actionId("ntf_" + subId)),
+                    button(b -> b.text(plainText("🗑️  삭제")).actionId("del_" + subId).style("danger"))
+            ))));
+            blocks.add(divider());
         }
+
+        blocks.addAll(buildListActions());
         return blocks;
+    }
+
+    // ── 삭제 확인 ────────────────────────────────────────────────────────────────
+
+    public static List<LayoutBlock> buildDeleteConfirm(SubscriptionResponse sub) {
+        String text = String.format("*%s* 구독을 삭제할까요?\n매월 %d일 결제  ·  ₩%s",
+                sub.getServiceName(),
+                sub.getBillingDay(),
+                formatAmount(sub.getAmount()));
+        return List.of(
+                section(s -> s.text(markdownText(text))),
+                actions(a -> a.elements(List.of(
+                        button(b -> b.text(plainText("🗑️  삭제 확인")).actionId("del_ok_" + sub.getId()).style("danger")),
+                        button(b -> b.text(plainText("← 취소")).actionId("back_list"))
+                )))
+        );
+    }
+
+    // ── 알림 일수 선택 ───────────────────────────────────────────────────────────
+
+    public static List<LayoutBlock> buildNotifyOptions(SubscriptionResponse sub) {
+        long subId = sub.getId();
+        return List.of(
+                section(s -> s.text(markdownText(
+                        String.format("*🔔 %s 알림 설정*\n결제 며칠 전에 알림을 받으시겠어요?", sub.getServiceName())))),
+                actions(a -> a.elements(List.of(
+                        button(b -> b.text(plainText("1일 전")).actionId("ntf_ok_1_" + subId)),
+                        button(b -> b.text(plainText("3일 전")).actionId("ntf_ok_3_" + subId)),
+                        button(b -> b.text(plainText("7일 전")).actionId("ntf_ok_7_" + subId)),
+                        button(b -> b.text(plainText("← 취소")).actionId("back_list"))
+                )))
+        );
     }
 
     // ── 구독 추가 완료 ───────────────────────────────────────────────────────────
@@ -94,69 +128,52 @@ public class SlackMessageBuilder {
 
     // ── 카테고리 버튼 ────────────────────────────────────────────────────────────
 
-    public static List<LayoutBlock> buildCategoryButtons() {
+    public static List<LayoutBlock> buildCategoryButtons(List<String> customCategories) {
         List<LayoutBlock> blocks = new ArrayList<>();
         blocks.add(section(s -> s.text(markdownText("*➕ 구독 추가*\n어떤 종류의 구독인가요?"))));
         blocks.add(divider());
 
-        List<ButtonElement> allButtons = new ArrayList<>();
-        for (SubscriptionCategory cat : SubscriptionCategory.values()) {
-            String label = categoryEmoji(cat) + "  " + categoryLabel(cat);
-            String actionId = "category_" + cat.name();
-            allButtons.add(button(b -> b.text(plainText(label)).actionId(actionId)));
-        }
-        allButtons.add(button(b -> b.text(plainText("✏️  직접 입력")).actionId("new_category")));
+        // 기본 3개 + 직접 입력
+        blocks.add(actions(a -> a.elements(List.of(
+                button(b -> b.text(plainText("📺  OTT")).actionId("category_OTT")),
+                button(b -> b.text(plainText("🎵  음악")).actionId("category_MUSIC_STREAMING")),
+                button(b -> b.text(plainText("🤖  AI")).actionId("category_AI_TOOL")),
+                button(b -> b.text(plainText("✏️  직접 입력")).actionId("new_category"))
+        ))));
 
-        int chunkSize = 4;
-        for (int i = 0; i < allButtons.size(); i += chunkSize) {
-            List<ButtonElement> chunk = List.copyOf(allButtons.subList(i, Math.min(i + chunkSize, allButtons.size())));
-            blocks.add(actions(a -> a.elements(new ArrayList<>(chunk))));
-        }
-        return blocks;
-    }
-
-    // ── 구독 선택 버튼 (이력/삭제용) ─────────────────────────────────────────────
-
-    public static List<LayoutBlock> buildSubscriptionButtons(List<SubscriptionResponse> subs, String actionPrefix) {
-        List<LayoutBlock> blocks = new ArrayList<>();
-
-        String title = actionPrefix.equals("history") ? "📜  결제 이력" : "🗑️  구독 삭제";
-        String guide = actionPrefix.equals("history") ? "이력을 확인할 구독을 선택해주세요." : "삭제할 구독을 선택해주세요.";
-
-        if (subs.isEmpty()) {
-            blocks.add(section(s -> s.text(markdownText("등록된 구독이 없어요."))));
-            return blocks;
-        }
-
-        blocks.add(section(s -> s.text(markdownText(String.format("*%s*\n%s", title, guide)))));
-
-        List<ButtonElement> buttons = new ArrayList<>();
-        for (SubscriptionResponse sub : subs) {
-            String label = categoryEmoji(sub.getCategory()) + "  " + sub.getServiceName();
-            String actionId = actionPrefix + "_sub_" + sub.getId();
-            ButtonElement btn = button(b -> b.text(plainText(label)).actionId(actionId));
-            if (actionPrefix.equals("delete")) {
-                buttons.add(button(b -> b.text(plainText(label)).actionId(actionId).style("danger")));
-            } else {
-                buttons.add(btn);
+        // 이전 커스텀 카테고리 (인덱스 기반 고유 actionId + value에 이름)
+        if (customCategories != null && !customCategories.isEmpty()) {
+            int chunkSize = 5;
+            for (int i = 0; i < customCategories.size(); i += chunkSize) {
+                List<String> chunk = customCategories.subList(i, Math.min(i + chunkSize, customCategories.size()));
+                List<ButtonElement> buttons = new ArrayList<>();
+                for (int j = 0; j < chunk.size(); j++) {
+                    String cat = chunk.get(j);
+                    final int idx = i + j;
+                    buttons.add(button(b -> b.text(plainText(cat)).actionId("custom_cat_" + idx).value(cat)));
+                }
+                blocks.add(actions(a -> a.elements(new ArrayList<>(buttons))));
             }
         }
 
-        int chunkSize = 5;
-        for (int i = 0; i < buttons.size(); i += chunkSize) {
-            List<ButtonElement> chunk = List.copyOf(buttons.subList(i, Math.min(i + chunkSize, buttons.size())));
-            blocks.add(actions(a -> a.elements(new ArrayList<>(chunk))));
-        }
+        blocks.add(divider());
+        blocks.add(actions(a -> a.elements(List.of(
+                button(b -> b.text(plainText("← 취소")).actionId("back_list"))
+        ))));
         return blocks;
     }
 
     // ── 결제 이력 ────────────────────────────────────────────────────────────────
 
-    public static List<LayoutBlock> buildPaymentHistory(List<PaymentRecord> records) {
+    public static List<LayoutBlock> buildPaymentHistory(String serviceName, List<PaymentRecord> records) {
         List<LayoutBlock> blocks = new ArrayList<>();
 
         if (records.isEmpty()) {
-            blocks.add(section(s -> s.text(markdownText("*📜 결제 이력*\n\n아직 결제 이력이 없어요."))));
+            blocks.add(section(s -> s.text(markdownText(
+                    String.format("*📜 %s 결제 이력*\n\n아직 결제 이력이 없어요.", serviceName)))));
+            blocks.add(actions(a -> a.elements(List.of(
+                    button(b -> b.text(plainText("← 목록으로")).actionId("back_list"))
+            ))));
             return blocks;
         }
 
@@ -165,7 +182,8 @@ public class SlackMessageBuilder {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         blocks.add(section(s -> s.text(markdownText(
-                String.format("*📜 결제 이력*   _%d건 · 총 ₩%s_", records.size(), formatAmount(total))))));
+                String.format("*📜 %s 결제 이력*   _%d건 · 총 ₩%s_",
+                        serviceName, records.size(), formatAmount(total))))));
         blocks.add(divider());
 
         for (PaymentRecord record : records) {
@@ -180,6 +198,11 @@ public class SlackMessageBuilder {
                     formatAmount(record.getAmount()));
             blocks.add(section(s -> s.text(markdownText(text))));
         }
+
+        blocks.add(divider());
+        blocks.add(actions(a -> a.elements(List.of(
+                button(b -> b.text(plainText("← 목록으로")).actionId("back_list"))
+        ))));
         return blocks;
     }
 
@@ -258,6 +281,8 @@ public class SlackMessageBuilder {
                 `/billmate report` — 월간 리포트
                 `/billmate history [id]` — 결제 이력
                 `/billmate share add [id] [@user] [금액]` — 공유 추가
+                `/billmate clear` — DM 대화 기록 정리
+                `/billmate seed [months]` — 테스트용 결제 이력 생성 (기본 6개월)
                 """;
         return List.of(section(s -> s.text(markdownText(helpText))));
     }

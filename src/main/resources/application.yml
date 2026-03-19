@@ -21,3 +21,8 @@ slack:
 
 quickchart:
   base-url: https://quickchart.io
+
+# 테스트용 시드 커맨드 활성화 (운영 시 제거 또는 false로 변경)
+billmate:
+  features:
+    seed: true

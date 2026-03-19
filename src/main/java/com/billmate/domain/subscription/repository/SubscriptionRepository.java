@@ -23,4 +23,7 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, Long
 
     @Query("SELECT s FROM Subscription s WHERE s.user = :user AND s.isActive = true ORDER BY s.createdAt ASC")
     List<Subscription> findActiveByUserOrderByCreatedAt(@Param("user") User user);
+
+    @Query("SELECT DISTINCT s.customCategoryName FROM Subscription s WHERE s.user = :user AND s.isActive = true AND s.customCategoryName IS NOT NULL")
+    List<String> findDistinctCustomCategoryNames(@Param("user") User user);
 }

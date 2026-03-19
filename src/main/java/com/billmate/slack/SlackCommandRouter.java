@@ -5,6 +5,7 @@ import com.slack.api.bolt.App;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Slf4j
@@ -21,6 +22,11 @@ public class SlackCommandRouter {
     private final ShareCommandHandler shareHandler;
     private final HistoryCommandHandler historyHandler;
     private final HelpCommandHandler helpHandler;
+    private final ClearCommandHandler clearHandler;
+
+    // billmate.features.seed=true 일 때만 빈이 등록되므로 optional 주입
+    @Autowired(required = false)
+    private SeedCommandHandler seedHandler;
 
     @PostConstruct
     public void registerHandlers() {
@@ -40,6 +46,10 @@ public class SlackCommandRouter {
                     case "report"  -> reportHandler.handle(req, ctx);
                     case "share"   -> shareHandler.handle(req, ctx);
                     case "history" -> historyHandler.handle(req, ctx);
+                    case "clear"   -> clearHandler.handle(req, ctx);
+                    case "seed"    -> seedHandler != null
+                            ? seedHandler.handle(req, ctx)
+                            : helpHandler.handle(req, ctx);
                     default        -> helpHandler.handle(req, ctx);
                 };
             } catch (Exception e) {

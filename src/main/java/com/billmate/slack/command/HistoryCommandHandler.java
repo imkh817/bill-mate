@@ -59,7 +59,7 @@ public class HistoryCommandHandler implements CommandHandler {
 
             ctx.client().chatPostMessage(r -> r
                     .channel(slackUserId)
-                    .blocks(SlackMessageBuilder.buildPaymentHistory(records)));
+                    .blocks(SlackMessageBuilder.buildPaymentHistory(subscription.getServiceName(), records)));
 
         } catch (IllegalArgumentException e) {
             try {

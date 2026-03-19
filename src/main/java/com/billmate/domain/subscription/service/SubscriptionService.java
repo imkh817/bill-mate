@@ -75,4 +75,14 @@ public class SubscriptionService {
         return subscriptionRepository.findByIdAndUserAndIsActiveTrue(subscriptionId, user)
                 .orElseThrow(() -> new IllegalArgumentException("Subscription not found: " + subscriptionId));
     }
+
+    @Transactional(readOnly = true)
+    public List<Subscription> listEntitiesByUser(User user) {
+        return subscriptionRepository.findByUserAndIsActiveTrue(user);
+    }
+
+    @Transactional(readOnly = true)
+    public List<String> getDistinctCustomCategories(User user) {
+        return subscriptionRepository.findDistinctCustomCategoryNames(user);
+    }
 }

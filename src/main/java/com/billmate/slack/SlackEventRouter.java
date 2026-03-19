@@ -1,10 +1,12 @@
 package com.billmate.slack;
 
+import com.billmate.domain.notification.service.NotificationService;
 import com.billmate.domain.payment.service.PaymentRecordService;
 import com.billmate.domain.report.service.ReportService;
 import com.billmate.domain.subscription.dto.SubscriptionCreateRequest;
 import com.billmate.domain.subscription.dto.SubscriptionResponse;
 import com.billmate.domain.subscription.entity.BillingCycle;
+import com.billmate.domain.subscription.entity.Subscription;
 import com.billmate.domain.subscription.entity.SubscriptionCategory;
 import com.billmate.domain.subscription.service.SubscriptionService;
 import com.billmate.domain.user.entity.User;
@@ -12,8 +14,12 @@ import com.billmate.domain.user.service.UserService;
 import com.billmate.slack.install.InstallationTokenResolver;
 import com.billmate.slack.message.SlackMessageBuilder;
 import com.slack.api.bolt.App;
+import com.slack.api.model.block.LayoutBlock;
 import com.slack.api.model.event.MessageEvent;
 import jakarta.annotation.PostConstruct;
+
+import static com.slack.api.model.block.Blocks.section;
+import static com.slack.api.model.block.composition.BlockCompositions.markdownText;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -33,6 +39,7 @@ public class SlackEventRouter {
     private final SubscriptionService subscriptionService;
     private final PaymentRecordService paymentRecordService;
     private final ReportService reportService;
+    private final NotificationService notificationService;
     private final ConversationStateStore stateStore;
     private final InstallationTokenResolver tokenResolver;
 
@@ -60,7 +67,7 @@ public class SlackEventRouter {
             if (state != null) {
                 processConversationInput(userId, teamId, text, state);
             } else {
-                sendMainMenu(userId, teamId, null);
+                sendSubscriptionListOrWelcome(userId, teamId);
             }
             return ctx.ack();
         });
@@ -70,16 +77,18 @@ public class SlackEventRouter {
 
     private void registerActionHandlers() {
 
+        // 목록 보기
         app.blockAction("menu_list", (req, ctx) -> {
             ctx.ack();
             String userId = req.getPayload().getUser().getId();
             String teamId = req.getPayload().getTeam().getId();
+            String channelId = req.getPayload().getChannel().getId();
+            String messageTs = req.getPayload().getMessage().getTs();
             try {
                 String botToken = tokenResolver.getBotToken(teamId);
                 User user = userService.getOrCreateUser(userId, teamId, null);
                 List<SubscriptionResponse> subs = subscriptionService.listByUser(user);
-                post(botToken, userId, SlackMessageBuilder.buildSubscriptionList(subs));
-                sendMainMenu(userId, teamId, null);
+                update(botToken, channelId, messageTs, SlackMessageBuilder.buildSubscriptionList(subs));
             } catch (Exception e) {
                 log.error("menu_list error", e);
                 sendError(userId, teamId, e.getMessage());
@@ -87,14 +96,24 @@ public class SlackEventRouter {
             return ctx.ack();
         });
 
+        // 리포트 발송: 기존 메시지를 정적 텍스트로 교체 후, 구독 목록을 새 메시지로 하단에 포스팅
         app.blockAction("menu_report", (req, ctx) -> {
             ctx.ack();
             String userId = req.getPayload().getUser().getId();
             String teamId = req.getPayload().getTeam().getId();
+            String channelId = req.getPayload().getChannel().getId();
+            String messageTs = req.getPayload().getMessage().getTs();
             try {
+                String botToken = tokenResolver.getBotToken(teamId);
                 User user = userService.getOrCreateUser(userId, teamId, null);
+                // 1. 기존 메시지를 정적 완료 텍스트로 교체 (버튼 제거)
+                update(botToken, channelId, messageTs,
+                        List.of(section(s -> s.text(markdownText("📊 리포트가 발송되었습니다.")))));
+                // 2. 리포트 발송 (새 메시지)
                 reportService.sendReportToUser(user, YearMonth.now());
-                sendMainMenu(userId, teamId, null);
+                // 3. 구독 목록을 새 메시지로 채팅 하단에 포스팅
+                List<SubscriptionResponse> subs = subscriptionService.listByUser(user);
+                post(botToken, channelId, SlackMessageBuilder.buildSubscriptionList(subs));
             } catch (Exception e) {
                 log.error("menu_report error", e);
                 sendError(userId, teamId, e.getMessage());
@@ -102,77 +121,155 @@ public class SlackEventRouter {
             return ctx.ack();
         });
 
+        // 카테고리 선택 화면으로 업데이트 (커스텀 카테고리 목록 포함)
         app.blockAction("menu_add", (req, ctx) -> {
             ctx.ack();
             String userId = req.getPayload().getUser().getId();
             String teamId = req.getPayload().getTeam().getId();
+            String channelId = req.getPayload().getChannel().getId();
+            String messageTs = req.getPayload().getMessage().getTs();
             try {
                 String botToken = tokenResolver.getBotToken(teamId);
-                post(botToken, userId, SlackMessageBuilder.buildCategoryButtons());
+                User user = userService.getOrCreateUser(userId, teamId, null);
+                List<String> customCats = subscriptionService.getDistinctCustomCategories(user);
+                update(botToken, channelId, messageTs, SlackMessageBuilder.buildCategoryButtons(customCats));
             } catch (Exception e) {
                 log.error("menu_add error", e);
             }
             return ctx.ack();
         });
 
-        app.blockAction("menu_history", (req, ctx) -> {
+        // hist_{id}: 결제 이력 표시
+        app.blockAction(Pattern.compile("hist_(\\d+)"), (req, ctx) -> {
             ctx.ack();
             String userId = req.getPayload().getUser().getId();
             String teamId = req.getPayload().getTeam().getId();
+            String channelId = req.getPayload().getChannel().getId();
+            String messageTs = req.getPayload().getMessage().getTs();
+            String actionId = req.getPayload().getActions().get(0).getActionId();
+            long subscriptionId = Long.parseLong(actionId.substring("hist_".length()));
             try {
                 String botToken = tokenResolver.getBotToken(teamId);
                 User user = userService.getOrCreateUser(userId, teamId, null);
-                List<SubscriptionResponse> subs = subscriptionService.listByUser(user);
-                post(botToken, userId, SlackMessageBuilder.buildSubscriptionButtons(subs, "history"));
+                Subscription sub = subscriptionService.getActiveSubscription(user, subscriptionId);
+                var records = paymentRecordService.getHistory(sub);
+                update(botToken, channelId, messageTs,
+                        SlackMessageBuilder.buildPaymentHistory(sub.getServiceName(), records));
             } catch (Exception e) {
-                log.error("menu_history error", e);
+                log.error("hist action error", e);
                 sendError(userId, teamId, e.getMessage());
             }
             return ctx.ack();
         });
 
-        app.blockAction("menu_delete", (req, ctx) -> {
+        // del_{id}: 삭제 확인 화면
+        app.blockAction(Pattern.compile("del_(\\d+)"), (req, ctx) -> {
             ctx.ack();
             String userId = req.getPayload().getUser().getId();
             String teamId = req.getPayload().getTeam().getId();
+            String channelId = req.getPayload().getChannel().getId();
+            String messageTs = req.getPayload().getMessage().getTs();
+            String actionId = req.getPayload().getActions().get(0).getActionId();
+            long subscriptionId = Long.parseLong(actionId.substring("del_".length()));
             try {
                 String botToken = tokenResolver.getBotToken(teamId);
                 User user = userService.getOrCreateUser(userId, teamId, null);
-                List<SubscriptionResponse> subs = subscriptionService.listByUser(user);
-                post(botToken, userId, SlackMessageBuilder.buildSubscriptionButtons(subs, "delete"));
+                Subscription sub = subscriptionService.getActiveSubscription(user, subscriptionId);
+                update(botToken, channelId, messageTs,
+                        SlackMessageBuilder.buildDeleteConfirm(SubscriptionResponse.from(sub)));
             } catch (Exception e) {
-                log.error("menu_delete error", e);
+                log.error("del action error", e);
                 sendError(userId, teamId, e.getMessage());
             }
             return ctx.ack();
         });
 
-        app.blockAction("menu_notify", (req, ctx) -> {
+        // del_ok_{id}: 실제 삭제 후 목록으로
+        app.blockAction(Pattern.compile("del_ok_(\\d+)"), (req, ctx) -> {
             ctx.ack();
             String userId = req.getPayload().getUser().getId();
             String teamId = req.getPayload().getTeam().getId();
+            String channelId = req.getPayload().getChannel().getId();
+            String messageTs = req.getPayload().getMessage().getTs();
+            String actionId = req.getPayload().getActions().get(0).getActionId();
+            long subscriptionId = Long.parseLong(actionId.substring("del_ok_".length()));
             try {
                 String botToken = tokenResolver.getBotToken(teamId);
-                String guide = "알림 설정은 슬래시 커맨드를 사용해주세요.\n`/billmate notify [구독ID] [일수]`\n예) `/billmate notify 1 3` — 결제 3일 전 알림";
-                post(botToken, userId, SlackMessageBuilder.buildError(guide));
-                sendMainMenu(userId, teamId, null);
+                User user = userService.getOrCreateUser(userId, teamId, null);
+                subscriptionService.delete(user, subscriptionId);
+                List<SubscriptionResponse> subs = subscriptionService.listByUser(user);
+                update(botToken, channelId, messageTs, SlackMessageBuilder.buildSubscriptionList(subs));
             } catch (Exception e) {
-                log.error("menu_notify error", e);
+                log.error("del_ok action error", e);
+                sendError(userId, teamId, e.getMessage());
             }
             return ctx.ack();
         });
 
-        app.blockAction("menu_share", (req, ctx) -> {
+        // ntf_{id}: 알림 일수 선택 화면
+        app.blockAction(Pattern.compile("ntf_(\\d+)"), (req, ctx) -> {
             ctx.ack();
             String userId = req.getPayload().getUser().getId();
             String teamId = req.getPayload().getTeam().getId();
+            String channelId = req.getPayload().getChannel().getId();
+            String messageTs = req.getPayload().getMessage().getTs();
+            String actionId = req.getPayload().getActions().get(0).getActionId();
+            long subscriptionId = Long.parseLong(actionId.substring("ntf_".length()));
             try {
                 String botToken = tokenResolver.getBotToken(teamId);
-                String guide = "공유 설정은 슬래시 커맨드를 사용해주세요.\n`/billmate share add [구독ID] [@유저] [금액]`";
-                post(botToken, userId, SlackMessageBuilder.buildError(guide));
-                sendMainMenu(userId, teamId, null);
+                User user = userService.getOrCreateUser(userId, teamId, null);
+                Subscription sub = subscriptionService.getActiveSubscription(user, subscriptionId);
+                update(botToken, channelId, messageTs,
+                        SlackMessageBuilder.buildNotifyOptions(SubscriptionResponse.from(sub)));
             } catch (Exception e) {
-                log.error("menu_share error", e);
+                log.error("ntf action error", e);
+                sendError(userId, teamId, e.getMessage());
+            }
+            return ctx.ack();
+        });
+
+        // ntf_ok_{days}_{id}: 알림 저장 후 목록으로
+        app.blockAction(Pattern.compile("ntf_ok_(\\d+)_(\\d+)"), (req, ctx) -> {
+            ctx.ack();
+            String userId = req.getPayload().getUser().getId();
+            String teamId = req.getPayload().getTeam().getId();
+            String channelId = req.getPayload().getChannel().getId();
+            String messageTs = req.getPayload().getMessage().getTs();
+            String actionId = req.getPayload().getActions().get(0).getActionId();
+            String rest = actionId.substring("ntf_ok_".length()); // "{days}_{id}"
+            int underscoreIdx = rest.indexOf('_');
+            int days = Integer.parseInt(rest.substring(0, underscoreIdx));
+            long subscriptionId = Long.parseLong(rest.substring(underscoreIdx + 1));
+            try {
+                String botToken = tokenResolver.getBotToken(teamId);
+                User user = userService.getOrCreateUser(userId, teamId, null);
+                Subscription sub = subscriptionService.getActiveSubscription(user, subscriptionId);
+                notificationService.addCustomNotification(user, sub, days);
+                List<SubscriptionResponse> subs = subscriptionService.listByUser(user);
+                update(botToken, channelId, messageTs, SlackMessageBuilder.buildSubscriptionList(subs));
+            } catch (Exception e) {
+                log.error("ntf_ok action error", e);
+                sendError(userId, teamId, e.getMessage());
+            }
+            return ctx.ack();
+        });
+
+        // back_list: state 초기화 후 목록으로
+        app.blockAction("back_list", (req, ctx) -> {
+            ctx.ack();
+            String userId = req.getPayload().getUser().getId();
+            String teamId = req.getPayload().getTeam().getId();
+            String channelId = req.getPayload().getChannel().getId();
+            String messageTs = req.getPayload().getMessage().getTs();
+            try {
+                String botToken = tokenResolver.getBotToken(teamId);
+                stateStore.remove(userId);
+                User user = userService.getOrCreateUser(userId, teamId, null);
+                List<SubscriptionResponse> subs = subscriptionService.listByUser(user);
+                update(botToken, channelId, messageTs, SlackMessageBuilder.buildSubscriptionList(subs));
+            } catch (Exception e) {
+                log.error("back_list error", e);
+                sendError(userId, teamId, e.getMessage());
             }
             return ctx.ack();
         });
@@ -182,6 +279,8 @@ public class SlackEventRouter {
             ctx.ack();
             String userId = req.getPayload().getUser().getId();
             String teamId = req.getPayload().getTeam().getId();
+            String channelId = req.getPayload().getChannel().getId();
+            String messageTs = req.getPayload().getMessage().getTs();
             String actionId = req.getPayload().getActions().get(0).getActionId();
             String categoryCode = actionId.substring("category_".length());
 
@@ -195,9 +294,38 @@ public class SlackEventRouter {
                 String botToken = tokenResolver.getBotToken(teamId);
                 String catLabel = SlackMessageBuilder.categoryEmoji(SubscriptionCategory.valueOf(categoryCode))
                         + "  " + SlackMessageBuilder.categoryLabel(SubscriptionCategory.valueOf(categoryCode));
-                postText(botToken, userId, String.format("*%s* 를 선택하셨어요.\n\n서비스 이름을 입력해주세요.\n_예) Netflix, Spotify, GitHub_", catLabel));
+                String prompt = String.format("*%s* 를 선택하셨어요.\n\n서비스 이름을 아래 DM에 입력해주세요.\n_예) Netflix, Spotify, GitHub_", catLabel);
+                update(botToken, channelId, messageTs,
+                        List.of(section(s -> s.text(markdownText(prompt)))));
             } catch (Exception e) {
                 log.error("category action error", e);
+            }
+            return ctx.ack();
+        });
+
+        // custom_cat_{idx}: 이전 커스텀 카테고리 선택
+        app.blockAction(Pattern.compile("custom_cat_(\\d+)"), (req, ctx) -> {
+            ctx.ack();
+            String userId = req.getPayload().getUser().getId();
+            String teamId = req.getPayload().getTeam().getId();
+            String channelId = req.getPayload().getChannel().getId();
+            String messageTs = req.getPayload().getMessage().getTs();
+            String categoryName = req.getPayload().getActions().get(0).getValue();
+
+            ConversationState state = new ConversationState();
+            state.setStep(ConversationStep.AWAITING_SERVICE_NAME);
+            state.setCategoryCode("OTHER");
+            state.setCustomCategoryName(categoryName);
+            state.setTeamId(teamId);
+            stateStore.put(userId, state);
+
+            try {
+                String botToken = tokenResolver.getBotToken(teamId);
+                String prompt = String.format("*%s* 카테고리를 선택하셨어요.\n\n서비스 이름을 아래 DM에 입력해주세요.\n_예) Netflix, Spotify, GitHub_", categoryName);
+                update(botToken, channelId, messageTs,
+                        List.of(section(s -> s.text(markdownText(prompt)))));
+            } catch (Exception e) {
+                log.error("custom_cat action error", e);
             }
             return ctx.ack();
         });
@@ -207,6 +335,8 @@ public class SlackEventRouter {
             ctx.ack();
             String userId = req.getPayload().getUser().getId();
             String teamId = req.getPayload().getTeam().getId();
+            String channelId = req.getPayload().getChannel().getId();
+            String messageTs = req.getPayload().getMessage().getTs();
 
             ConversationState state = new ConversationState();
             state.setStep(ConversationStep.AWAITING_CUSTOM_CATEGORY);
@@ -215,53 +345,10 @@ public class SlackEventRouter {
 
             try {
                 String botToken = tokenResolver.getBotToken(teamId);
-                postText(botToken, userId, "카테고리 이름을 직접 입력해주세요.\n_예) 클라우드, 업무 도구_");
+                update(botToken, channelId, messageTs,
+                        List.of(section(s -> s.text(markdownText("카테고리 이름을 아래 DM에 입력해주세요.\n_예) 클라우드, 업무 도구_")))));
             } catch (Exception e) {
                 log.error("new_category action error", e);
-            }
-            return ctx.ack();
-        });
-
-        // history_sub_{id} → 결제 이력 표시 후 메인 메뉴
-        app.blockAction(Pattern.compile("history_sub_(\\d+)"), (req, ctx) -> {
-            ctx.ack();
-            String userId = req.getPayload().getUser().getId();
-            String teamId = req.getPayload().getTeam().getId();
-            String actionId = req.getPayload().getActions().get(0).getActionId();
-            long subscriptionId = Long.parseLong(actionId.substring("history_sub_".length()));
-
-            try {
-                String botToken = tokenResolver.getBotToken(teamId);
-                User user = userService.getOrCreateUser(userId, teamId, null);
-                var subscription = subscriptionService.getActiveSubscription(user, subscriptionId);
-                var records = paymentRecordService.getHistory(subscription);
-                post(botToken, userId, SlackMessageBuilder.buildPaymentHistory(records));
-                sendMainMenu(userId, teamId, null);
-            } catch (Exception e) {
-                log.error("history_sub action error", e);
-                sendError(userId, teamId, e.getMessage());
-            }
-            return ctx.ack();
-        });
-
-        // delete_sub_{id} → 삭제 후 메인 메뉴
-        app.blockAction(Pattern.compile("delete_sub_(\\d+)"), (req, ctx) -> {
-            ctx.ack();
-            String userId = req.getPayload().getUser().getId();
-            String teamId = req.getPayload().getTeam().getId();
-            String actionId = req.getPayload().getActions().get(0).getActionId();
-            long subscriptionId = Long.parseLong(actionId.substring("delete_sub_".length()));
-
-            try {
-                User user = userService.getOrCreateUser(userId, teamId, null);
-                var subscription = subscriptionService.getActiveSubscription(user, subscriptionId);
-                String serviceName = subscription.getServiceName();
-                subscriptionService.delete(user, subscriptionId);
-                sendMainMenu(userId, teamId,
-                        String.format("✅  *%s* 구독을 삭제했어요.", serviceName));
-            } catch (Exception e) {
-                log.error("delete_sub action error", e);
-                sendError(userId, teamId, e.getMessage());
             }
             return ctx.ack();
         });
@@ -303,7 +390,7 @@ public class SlackEventRouter {
                             ? SubscriptionCategory.valueOf(state.getCategoryCode())
                             : SubscriptionCategory.OTHER;
 
-                    SubscriptionResponse sub = subscriptionService.create(user,
+                    subscriptionService.create(user,
                             SubscriptionCreateRequest.builder()
                                     .serviceName(state.getServiceName())
                                     .category(category)
@@ -313,9 +400,7 @@ public class SlackEventRouter {
                                     .billingCycle(BillingCycle.MONTHLY)
                                     .build());
 
-                    sendMainMenu(userId, resolvedTeamId,
-                            String.format("✅  *%s* 구독을 등록했어요!\n매월 *%d일* 결제 · *₩%,.0f*",
-                                    sub.getServiceName(), billingDay, state.getAmount()));
+                    sendSubscriptionListOrWelcome(userId, resolvedTeamId);
                 }
             }
         } catch (NumberFormatException e) {
@@ -329,12 +414,14 @@ public class SlackEventRouter {
 
     // ── 유틸 ────────────────────────────────────────────────────────────────────
 
-    private void sendMainMenu(String userId, String teamId, String contextMessage) {
+    private void sendSubscriptionListOrWelcome(String userId, String teamId) {
         try {
             String botToken = tokenResolver.getBotToken(teamId);
-            post(botToken, userId, SlackMessageBuilder.buildMainMenu(contextMessage));
+            User user = userService.getOrCreateUser(userId, teamId, null);
+            List<SubscriptionResponse> subs = subscriptionService.listByUser(user);
+            post(botToken, userId, SlackMessageBuilder.buildSubscriptionList(subs));
         } catch (Exception e) {
-            log.error("sendMainMenu error", e);
+            log.error("sendSubscriptionListOrWelcome error", e);
         }
     }
 
@@ -347,11 +434,16 @@ public class SlackEventRouter {
         }
     }
 
-    private void post(String botToken, String channel, java.util.List<com.slack.api.model.block.LayoutBlock> blocks) throws Exception {
+    private void post(String botToken, String channel, List<LayoutBlock> blocks) throws Exception {
         app.client().chatPostMessage(r -> r.token(botToken).channel(channel).blocks(blocks));
     }
 
     private void postText(String botToken, String channel, String text) throws Exception {
         app.client().chatPostMessage(r -> r.token(botToken).channel(channel).text(text));
     }
+
+    private void update(String botToken, String channel, String ts, List<LayoutBlock> blocks) throws Exception {
+        app.client().chatUpdate(r -> r.token(botToken).channel(channel).ts(ts).blocks(blocks).text(" "));
+    }
+
 }
