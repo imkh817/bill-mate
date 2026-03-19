@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: bill-mate
+  datasource:
+    url: jdbc:mysql://localhost:3555/billmate
+    username: root
+    password: password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+slack:
+  signing-secret: ${SLACK_SIGNING_SECRET:placeholder}
+  client-id: ${SLACK_CLIENT_ID:placeholder}
+  client-secret: ${SLACK_CLIENT_SECRET:placeholder}
+
+quickchart:
+  base-url: https://quickchart.io
